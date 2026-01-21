@@ -245,7 +245,9 @@ def load_cuda_data(directory):
                 })
     
     return pd.DataFrame(data)
-
+def make_time_format(dt):
+    # KST timezone으로 포맷팅
+    return dt.strftime('%Y/%m/%d-%H:%M:%S %Z')
 def get_update_time(cpu_dir, gpu_dir):
     # CPU 파일들의 최신 수정 시간 확인
     cpu_times = [
@@ -265,15 +267,14 @@ def get_update_time(cpu_dir, gpu_dir):
     
     # 가장 최신 시간 찾기
     latest_time = max(max(cpu_times), max(gpu_times))
-    
-    # KST timezone으로 포맷팅
-    return latest_time.strftime('%Y/%m/%d-%H:%M:%S %Z')
+    return latest_time
 
 def display_health_status(stats):
     """
     Display the health status based on Ansible output.
     """
-    st.markdown("### Health Status (서버정보)[https://www.notion.so/b370f0f0e94646299f133c85a2693505]")
+    st.markdown("### Health Status")
+    st.link_button("서버정보 페이지 (노션)", "https://www.notion.so/b370f0f0e94646299f133c85a2693505")
     # 링크 : https://www.notion.so/b370f0f0e94646299f133c85a2693505
     st.markdown("""
     - 🟢 정상 작동하는 서버
@@ -350,7 +351,9 @@ if "ansible_stats" not in st.session_state:
 
 # 마지막 리프레시 시간 초기화
 if "last_refresh_time" not in st.session_state:
-    st.session_state.last_refresh_time = None
+    print("Last Refresh Time Initialized")
+    # st.session_state.last_refresh_time = updated_time.timestamp()
+    st.session_state.last_refresh_time = time.time()
 
 # Refresh 버튼 클릭 이벤트
 REFRESH_COOLDOWN_SECONDS = 5 * 60  # 5분
@@ -363,11 +366,20 @@ if st.session_state.last_refresh_time is not None:
     if elapsed < REFRESH_COOLDOWN_SECONDS:
         can_refresh = False
         remaining_seconds = int(REFRESH_COOLDOWN_SECONDS - elapsed)
-
+print("Can Refresh:", can_refresh, "Remaining Seconds:", remaining_seconds)
 if not can_refresh:
     minutes = remaining_seconds // 60
     seconds = remaining_seconds % 60
+    available_at = datetime.fromtimestamp(
+        st.session_state.last_refresh_time + REFRESH_COOLDOWN_SECONDS
+    ).astimezone(pytz.timezone("Asia/Seoul"))
+    # 분단위 올림
+    if available_at.second > 0:
+        available_at += pd.Timedelta(minutes=1)
+    available_at = available_at.replace(second=0, microsecond=0)
+    
     st.warning(f"⏳ 아직 refresh 하기에는 {minutes}분 {seconds}초 남았습니다. (기준 5분)")
+    st.info(f"{available_at.strftime('%H:%M')}에 새로고침 가능합니다. (버튼 activate 하기 위해서는 새로고침이 필요합니다)")
 
 if st.button("Refresh Data", disabled=not can_refresh):
     st.session_state.last_refresh_time = time.time()
@@ -406,7 +418,7 @@ with status_container:
 
 # CPU 데이터 로드 및 시각화
 # get file update time
-st.markdown(f"Updated at : {updated_time}")
+st.markdown(f"Updated at : {make_time_format(updated_time)}")
 
 # 구분선
 st.markdown("--------------------------------")

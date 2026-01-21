@@ -1,0 +1,91 @@
+- name: Gather server health information
+  hosts: servers
+  gather_facts: no
+  strategy: free
+
+  tasks:
+    - name: Get OS info
+      shell: "source /etc/os-release && echo $ID$VERSION_ID"
+      args:
+        executable: /bin/bash
+      register: OS_info
+      async: 30
+      poll: 0
+    - name: Check CPU and Memory usage
+      shell: "top -b -n1 | head -5"
+      register: cpu_async
+      async: 30
+      poll: 0
+    - name: Check GPU status
+      shell: "nvidia-smi --query-gpu=index,name,memory.total,memory.used,utilization.gpu --format=csv,noheader,nounits"
+      register: gpu_async
+      async: 30
+      poll: 0
+      # ignore_errors: yes
+
+
+    - name: Wait for OS info check
+      async_status:
+        jid: "{{ OS_info.ansible_job_id }}"
+      register: os_status
+      until: os_status.finished
+      retries: 30
+      delay: 1
+
+    - name: Wait for CPU check
+      async_status:
+        jid: "{{ cpu_async.ansible_job_id }}"
+      register: top_output
+      until: top_output.finished
+      retries: 30
+      delay: 1
+
+    - name: Wait for GPU check
+      async_status:
+        jid: "{{ gpu_async.ansible_job_id }}"
+      register: gpu_status
+      until: gpu_status.finished
+      retries: 30
+      delay: 1
+
+
+    - name: Save OS status
+      copy:
+        content: "{{ os_status.stdout }}"
+        dest: "./os_status.json"
+      when: os_status.finished is defined and os_status.finished
+    - name: Save CPU status
+      copy:
+        content: "{{ top_output.stdout }}"
+        dest: "./cpu_status.json"
+      when: top_output.finished is defined and top_output.finished
+
+    - name: Save GPU status
+      copy:
+        content: "{{ gpu_status.stdout }}"
+        dest: "./gpu_status.json"
+      when: 
+        - gpu_status.finished is defined and gpu_status.finished
+
+
+    - name: Fetch status files (OS)
+      fetch:
+        src: "./os_status.json"
+        dest: "./info/os_status/{{ inventory_hostname }}.json"
+        flat: yes
+      when: os_status.finished is defined and os_status.finished
+
+    - name: Fetch status files (CPU)
+      fetch:
+        src: "./cpu_status.json"
+        dest: "./info/cpu_status/{{ inventory_hostname }}.json"
+        flat: yes
+      when: top_output.finished is defined and top_output.finished
+
+    - name: Fetch status files (GPU)
+      fetch:
+        src: "./gpu_status.json"
+        dest: "./info/gpu_status/{{ inventory_hostname }}.json"
+        flat: yes
+      when: 
+        - gpu_status.finished is defined and gpu_status.finished
