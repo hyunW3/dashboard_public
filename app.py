@@ -348,8 +348,29 @@ if "ansible_stats" not in st.session_state:
     else:
         st.session_state.ansible_stats = {"unreachable": [], "failed": [], "success": []}
 
+# 마지막 리프레시 시간 초기화
+if "last_refresh_time" not in st.session_state:
+    st.session_state.last_refresh_time = None
+
 # Refresh 버튼 클릭 이벤트
-if st.button("Refresh Data"):
+REFRESH_COOLDOWN_SECONDS = 5 * 60  # 5분
+
+# 남은 쿨다운 시간 계산
+can_refresh = True
+remaining_seconds = 0
+if st.session_state.last_refresh_time is not None:
+    elapsed = time.time() - st.session_state.last_refresh_time
+    if elapsed < REFRESH_COOLDOWN_SECONDS:
+        can_refresh = False
+        remaining_seconds = int(REFRESH_COOLDOWN_SECONDS - elapsed)
+
+if not can_refresh:
+    minutes = remaining_seconds // 60
+    seconds = remaining_seconds % 60
+    st.warning(f"⏳ 아직 refresh 하기에는 {minutes}분 {seconds}초 남았습니다. (기준 5분)")
+
+if st.button("Refresh Data", disabled=not can_refresh):
+    st.session_state.last_refresh_time = time.time()
     with st.spinner("Running Ansible Playbook..."):
         # ansible-playbook 경로 찾기
         ansible_path = get_ansible_playbook_path()
