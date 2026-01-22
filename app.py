@@ -7,6 +7,62 @@ import time
 from datetime import datetime
 import pytz
 import re, json
+import fcntl
+
+# Global lock files
+EXECUTION_LOCK_FILE = "info/execution.lock"
+LAST_GPU_REFRESH_FILE = "info/last_gpu_refresh_time.txt"
+LAST_INFO_REFRESH_FILE = "info/last_info_refresh_time.txt"
+
+# Cooldown settings
+GPU_REFRESH_COOLDOWN_SECONDS = 5 * 60  # 5분
+INFO_REFRESH_COOLDOWN_SECONDS = 24 * 60 * 60  # 1일
+
+
+def get_global_last_refresh_time(refresh_type="gpu"):
+    """Read the global last refresh timestamp from file."""
+    file_path = LAST_GPU_REFRESH_FILE if refresh_type == "gpu" else LAST_INFO_REFRESH_FILE
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, "r") as f:
+                return float(f.read().strip())
+        except (ValueError, IOError):
+            return 0.0
+    return 0.0
+
+
+def set_global_last_refresh_time(timestamp, refresh_type="gpu"):
+    """Write the global last refresh timestamp to file."""
+    file_path = LAST_GPU_REFRESH_FILE if refresh_type == "gpu" else LAST_INFO_REFRESH_FILE
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    with open(file_path, "w") as f:
+        f.write(str(timestamp))
+
+
+def acquire_execution_lock():
+    """
+    Try to acquire exclusive execution lock.
+    Returns (lock_file, success) tuple.
+    If success is True, caller must call release_execution_lock(lock_file) when done.
+    """
+    os.makedirs(os.path.dirname(EXECUTION_LOCK_FILE), exist_ok=True)
+    lock_file = open(EXECUTION_LOCK_FILE, "w")
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return lock_file, True
+    except (IOError, OSError):
+        lock_file.close()
+        return None, False
+
+
+def release_execution_lock(lock_file):
+    """Release the execution lock."""
+    if lock_file:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            lock_file.close()
+        except (IOError, OSError):
+            pass
 
 
 def get_ansible_playbook_path():
@@ -349,68 +405,140 @@ if "ansible_stats" not in st.session_state:
     else:
         st.session_state.ansible_stats = {"unreachable": [], "failed": [], "success": []}
 
-# 마지막 리프레시 시간 초기화
-if "last_refresh_time" not in st.session_state:
-    print("Last Refresh Time Initialized")
-    # st.session_state.last_refresh_time = updated_time.timestamp()
-    st.session_state.last_refresh_time = time.time()
+# GPU 쿨다운 확인 (5분)
+gpu_last_refresh_time = get_global_last_refresh_time("gpu")
+can_refresh_gpu = True
+gpu_remaining_seconds = 0
+if gpu_last_refresh_time > 0:
+    gpu_elapsed = time.time() - gpu_last_refresh_time
+    if gpu_elapsed < GPU_REFRESH_COOLDOWN_SECONDS:
+        can_refresh_gpu = False
+        gpu_remaining_seconds = int(GPU_REFRESH_COOLDOWN_SECONDS - gpu_elapsed)
 
-# Refresh 버튼 클릭 이벤트
-REFRESH_COOLDOWN_SECONDS = 5 * 60  # 5분
+# Info 쿨다운 확인 (1일)
+info_last_refresh_time = get_global_last_refresh_time("info")
+can_refresh_info = True
+info_remaining_seconds = 0
+if info_last_refresh_time > 0:
+    info_elapsed = time.time() - info_last_refresh_time
+    if info_elapsed < INFO_REFRESH_COOLDOWN_SECONDS:
+        can_refresh_info = False
+        info_remaining_seconds = int(INFO_REFRESH_COOLDOWN_SECONDS - info_elapsed)
 
-# 남은 쿨다운 시간 계산
-can_refresh = True
-remaining_seconds = 0
-if st.session_state.last_refresh_time is not None:
-    elapsed = time.time() - st.session_state.last_refresh_time
-    if elapsed < REFRESH_COOLDOWN_SECONDS:
-        can_refresh = False
-        remaining_seconds = int(REFRESH_COOLDOWN_SECONDS - elapsed)
-print("Can Refresh:", can_refresh, "Remaining Seconds:", remaining_seconds)
-if not can_refresh:
-    minutes = remaining_seconds // 60
-    seconds = remaining_seconds % 60
-    available_at = datetime.fromtimestamp(
-        st.session_state.last_refresh_time + REFRESH_COOLDOWN_SECONDS
+print("Can Refresh GPU:", can_refresh_gpu, "Remaining:", gpu_remaining_seconds)
+print("Can Refresh Info:", can_refresh_info, "Remaining:", info_remaining_seconds)
+
+# GPU 쿨다운 메시지
+if not can_refresh_gpu:
+    gpu_minutes = gpu_remaining_seconds // 60
+    gpu_seconds = gpu_remaining_seconds % 60
+    gpu_available_at = datetime.fromtimestamp(
+        gpu_last_refresh_time + GPU_REFRESH_COOLDOWN_SECONDS
     ).astimezone(pytz.timezone("Asia/Seoul"))
-    # 분단위 올림
-    if available_at.second > 0:
-        available_at += pd.Timedelta(minutes=1)
-    available_at = available_at.replace(second=0, microsecond=0)
-    
-    st.warning(f"⏳ 아직 refresh 하기에는 {minutes}분 {seconds}초 남았습니다. (기준 5분)")
-    st.info(f"{available_at.strftime('%H:%M')}에 새로고침 가능합니다. (버튼 activate 하기 위해서는 새로고침이 필요합니다)")
+    st.warning(f"⏳ GPU Refresh: {gpu_minutes}분 {gpu_seconds}초 남음 (기준 5분, 전체 유저 공유)")
 
-if st.button("Refresh Data", disabled=not can_refresh):
-    st.session_state.last_refresh_time = time.time()
-    with st.spinner("Running Ansible Playbook..."):
-        # ansible-playbook 경로 찾기
-        ansible_path = get_ansible_playbook_path()
-        
-        if ansible_path is None:
-            st.error("ansible-playbook을 찾을 수 없습니다!")
-            st.error("다음 명령어로 설치해주세요: pip install ansible")
-        else:
-            try:
-                result = subprocess.run(
-                    [ansible_path, "moniter_status.yml", "-i", "hosts.ini"],
-                    capture_output=True,
-                    text=True,
-                    check=True
-                )
-                st.success("Ansible Playbook executed successfully!")
-                health_status = parse_ansible_output(result.stdout)
-            except subprocess.CalledProcessError as e:
-                # st.error("Error running Ansible Playbook!")
-                health_status = parse_ansible_output(e.stdout or "")
-                if not e.stdout:
-                    st.error("Error running Ansible Playbook!")
-                    st.error(e.stderr)
+# Info 쿨다운 메시지
+if not can_refresh_info:
+    info_hours = info_remaining_seconds // 3600
+    info_minutes = (info_remaining_seconds % 3600) // 60
+    info_available_at = datetime.fromtimestamp(
+        info_last_refresh_time + INFO_REFRESH_COOLDOWN_SECONDS
+    ).astimezone(pytz.timezone("Asia/Seoul"))
+    st.warning(f"⏳ Info Refresh: {info_hours}시간 {info_minutes}분 남음 (기준 1일, 전체 유저 공유)")
 
-            with open(health_status_info, "w") as f:
-                json.dump(health_status, f)
-            st.session_state.ansible_stats = health_status
-            updated_time = get_update_time(cpu_data_directory, gpu_data_directory)
+# 두 개의 버튼을 나란히 배치
+col_btn1, col_btn2 = st.columns(2)
+
+with col_btn1:
+    refresh_gpu_clicked = st.button("Refresh GPU", disabled=not can_refresh_gpu)
+
+with col_btn2:
+    refresh_info_clicked = st.button("Refresh Info", disabled=not can_refresh_info)
+
+# Refresh GPU 버튼 처리 (GPU 메모리/사용률만 업데이트, 5분 쿨다운)
+if refresh_gpu_clicked:
+    lock_file, lock_acquired = acquire_execution_lock()
+
+    if not lock_acquired:
+        st.error("🔒 다른 사용자가 현재 데이터를 새로고침 중입니다. 잠시 후 다시 시도해주세요.")
+    else:
+        try:
+            current_gpu_time = get_global_last_refresh_time("gpu")
+            current_elapsed = time.time() - current_gpu_time
+            if current_gpu_time > 0 and current_elapsed < GPU_REFRESH_COOLDOWN_SECONDS:
+                st.warning("⏳ 다른 사용자가 방금 GPU 데이터를 새로고침했습니다. 페이지를 새로고침해주세요.")
+            else:
+                set_global_last_refresh_time(time.time(), "gpu")
+
+                with st.spinner("Refreshing GPU data..."):
+                    ansible_path = get_ansible_playbook_path()
+
+                    if ansible_path is None:
+                        st.error("ansible-playbook을 찾을 수 없습니다!")
+                        st.error("다음 명령어로 설치해주세요: pip install ansible")
+                    else:
+                        try:
+                            result = subprocess.run(
+                                [ansible_path, "monitor_gpu.yml", "-i", "hosts.ini"],
+                                capture_output=True,
+                                text=True,
+                                check=True
+                            )
+                            st.success("GPU data refreshed successfully!")
+                        except subprocess.CalledProcessError as e:
+                            if not e.stdout:
+                                st.error("Error refreshing GPU data!")
+                                st.error(e.stderr)
+                            else:
+                                st.success("GPU data refreshed!")
+
+                        updated_time = get_update_time(cpu_data_directory, gpu_data_directory)
+        finally:
+            release_execution_lock(lock_file)
+
+# Refresh Info 버튼 처리 (전체 정보 업데이트: OS, CPU, GPU + Health Status, 1일 쿨다운)
+if refresh_info_clicked:
+    lock_file, lock_acquired = acquire_execution_lock()
+
+    if not lock_acquired:
+        st.error("🔒 다른 사용자가 현재 데이터를 새로고침 중입니다. 잠시 후 다시 시도해주세요.")
+    else:
+        try:
+            current_info_time = get_global_last_refresh_time("info")
+            current_elapsed = time.time() - current_info_time
+            if current_info_time > 0 and current_elapsed < INFO_REFRESH_COOLDOWN_SECONDS:
+                st.warning("⏳ 다른 사용자가 방금 Info 데이터를 새로고침했습니다. 페이지를 새로고침해주세요.")
+            else:
+                set_global_last_refresh_time(time.time(), "info")
+
+                with st.spinner("Running Ansible Playbook..."):
+                    ansible_path = get_ansible_playbook_path()
+
+                    if ansible_path is None:
+                        st.error("ansible-playbook을 찾을 수 없습니다!")
+                        st.error("다음 명령어로 설치해주세요: pip install ansible")
+                    else:
+                        try:
+                            result = subprocess.run(
+                                [ansible_path, "moniter_status.yml", "-i", "hosts.ini"],
+                                capture_output=True,
+                                text=True,
+                                check=True
+                            )
+                            st.success("Ansible Playbook executed successfully!")
+                            health_status = parse_ansible_output(result.stdout)
+                        except subprocess.CalledProcessError as e:
+                            health_status = parse_ansible_output(e.stdout or "")
+                            if not e.stdout:
+                                st.error("Error running Ansible Playbook!")
+                                st.error(e.stderr)
+
+                        with open(health_status_info, "w") as f:
+                            json.dump(health_status, f)
+                        st.session_state.ansible_stats = health_status
+                        updated_time = get_update_time(cpu_data_directory, gpu_data_directory)
+        finally:
+            release_execution_lock(lock_file)
 # 상태 표시 영역 동적 업데이트
 status_container = st.container()
 with status_container:

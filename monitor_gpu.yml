@@ -1,0 +1,34 @@
+- name: Gather GPU status only
+  hosts: servers
+  gather_facts: no
+  strategy: free
+
+  tasks:
+    - name: Check GPU status
+      shell: "nvidia-smi --query-gpu=index,name,memory.total,memory.used,utilization.gpu --format=csv,noheader,nounits"
+      register: gpu_async
+      async: 30
+      poll: 0
+
+    - name: Wait for GPU check
+      async_status:
+        jid: "{{ gpu_async.ansible_job_id }}"
+      register: gpu_status
+      until: gpu_status.finished
+      retries: 30
+      delay: 1
+
+    - name: Save GPU status
+      copy:
+        content: "{{ gpu_status.stdout }}"
+        dest: "./gpu_status.json"
+      when:
+        - gpu_status.finished is defined and gpu_status.finished
+
+    - name: Fetch status files (GPU)
+      fetch:
+        src: "./gpu_status.json"
+        dest: "./info/gpu_status/{{ inventory_hostname }}.json"
+        flat: yes
+      when:
+        - gpu_status.finished is defined and gpu_status.finished
