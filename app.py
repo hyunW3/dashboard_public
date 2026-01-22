@@ -435,7 +435,7 @@ if not can_refresh_gpu:
     gpu_available_at = datetime.fromtimestamp(
         gpu_last_refresh_time + GPU_REFRESH_COOLDOWN_SECONDS
     ).astimezone(pytz.timezone("Asia/Seoul"))
-    st.warning(f"⏳ GPU Refresh: {gpu_minutes}분 {gpu_seconds}초 남음 (기준 5분, 전체 유저 공유)")
+    st.warning(f"⏳ GPU Refresh: {gpu_minutes}분 {gpu_seconds}초 남음 (기준 {GPU_REFRESH_COOLDOWN_SECONDS//60}분, 전체 유저 공유)")
 
 # Info 쿨다운 메시지
 if not can_refresh_info:
@@ -460,7 +460,7 @@ if refresh_gpu_clicked:
     lock_file, lock_acquired = acquire_execution_lock()
 
     if not lock_acquired:
-        st.error("🔒 다른 사용자가 현재 데이터를 새로고침 중입니다. 잠시 후 다시 시도해주세요.")
+        st.error("🔒 다른 사용자가 현재 데이터를 새로고침 중입니다. 잠시 후 새로고침해서 정보를 업데이트해주세요.")
     else:
         try:
             current_gpu_time = get_global_last_refresh_time("gpu")
