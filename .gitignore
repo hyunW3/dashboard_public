@@ -1,3 +1,9 @@
-info/
-hosts.ini
+# local, never commit (real IPs / names / accounts)
+server_info.txt
 ssh_config
+hosts.ini
+info/
+cache/
+collector.log
+collector.pid
+__pycache__/
