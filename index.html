@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Server Monitor</title>
+<style>
+:root{
+  --bg:#f6f7f9;--panel:#fff;--fg:#1b1f24;--muted:#667085;--line:#e4e7ec;--hover:#f2f4f7;
+  --accent:#2563eb;--ok:#16a34a;--warn:#d97706;--bad:#dc2626;--bar:#dbe4ff;--bar2:#2563eb;
+  --u0:#eef2f6;--u1:#bfdbfe;--u2:#60a5fa;--u3:#2563eb;--u4:#1e3a8a;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f1115;--panel:#171a21;--fg:#e6e8eb;--muted:#9aa3af;--line:#262b35;--hover:#1e232c;
+  --accent:#60a5fa;--bar:#1e2a44;--bar2:#60a5fa;--u0:#1f242d;--u1:#1e3a5f;--u2:#2563eb;--u3:#60a5fa;--u4:#bfdbfe;}}
+:root[data-theme="dark"]{
+  --bg:#0f1115;--panel:#171a21;--fg:#e6e8eb;--muted:#9aa3af;--line:#262b35;--hover:#1e232c;
+  --accent:#60a5fa;--bar:#1e2a44;--bar2:#60a5fa;--u0:#1f242d;--u1:#1e3a5f;--u2:#2563eb;--u3:#60a5fa;--u4:#bfdbfe;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif}
+.wrap{max-width:1500px;margin:0 auto;padding:20px 16px 60px}
+header{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 18px;margin-bottom:14px}
+h1{font-size:20px;margin:0}
+.muted{color:var(--muted)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:12px 0 16px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.kpi b{display:block;font-size:20px;font-variant-numeric:tabular-nums}
+.kpi span{color:var(--muted);font-size:12px}
+.bar-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap}
+.tabs button,.btn{background:var(--panel);color:var(--fg);border:1px solid var(--line);padding:6px 12px;border-radius:8px;cursor:pointer;font:inherit}
+.tabs button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.tabs button small{opacity:.75;margin-left:4px}
+input[type=search]{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;min-width:200px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:middle}
+th{font-size:12px;color:var(--muted);font-weight:600;cursor:pointer;user-select:none;position:sticky;top:0;background:var(--panel)}
+th.num,td.num{text-align:right}
+tr.row{cursor:pointer}
+tr.row:hover{background:var(--hover)}
+tr.detail>td{background:var(--bg);padding:10px 14px}
+tr.stale>td{opacity:.55}
+.caret{display:inline-block;width:14px;color:var(--muted);transition:transform .15s}
+tr.open .caret{transform:rotate(90deg)}
+.meter{display:flex;align-items:center;gap:8px}
+.meter>b{position:relative;flex:0 0 60px;height:10px;background:var(--bar);border-radius:5px;overflow:hidden}
+.meter>b>i{position:absolute;inset:0 auto 0 0;background:var(--bar2);border-radius:5px}
+.meter>em{font-style:normal;font-size:12px;white-space:nowrap}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+.ok{background:var(--ok)}.warn{background:var(--warn)}.bad{background:var(--bad)}
+.gcells{display:flex;gap:3px}
+.gcell{width:28px;height:22px;border-radius:4px;position:relative;overflow:hidden;border:1px solid var(--line);background:var(--u0);font-size:10px;text-align:center;line-height:20px}
+.gcell>i{position:absolute;left:0;right:0;bottom:0;background:var(--accent);opacity:.35}
+.gcell>s{position:relative;text-decoration:none}
+.sub{width:100%;font-size:13px}
+.sub th{position:static;background:transparent}
+.sub td,.sub th{padding:5px 8px}
+.cmd{max-width:620px;overflow:hidden;text-overflow:ellipsis;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;cursor:pointer}
+.cmd.full{white-space:pre-wrap;word-break:break-all;max-width:none}
+.tag{display:inline-block;background:var(--hover);border:1px solid var(--line);border-radius:6px;padding:0 6px;margin:1px 2px;font-size:12px}
+.dead{opacity:.5}
+.err{color:var(--bad);font-size:12px;white-space:normal;max-width:420px}
+.owner{font-size:13px;white-space:normal;min-width:70px;max-width:150px}
+.small{font-size:12px}
+h3{font-size:13px;margin:6px 0;color:var(--muted)}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:14px}
+@media (max-width:900px){.grid2{grid-template-columns:1fr}}
+dl.kv{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:0;font-size:13px}
+dl.kv dt{color:var(--muted)}
+footer{margin-top:14px;font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Server Monitor</h1>
+  <span class="muted" id="meta">loading…</span>
+  <span style="flex:1"></span>
+  <button class="btn" id="theme">테마</button>
+</header>
+<div class="kpis" id="kpis"></div>
+<div class="bar-row">
+  <div class="tabs" id="tabs"></div>
+  <input type="search" id="q" placeholder="서버 / 담당자 / 유저 / OS / CUDA 검색">
+</div>
+<div class="panel" id="view"></div>
+<footer id="foot"></footer>
+</div>
+<script>
+const $=s=>document.querySelector(s);
+let DATA=null, PLACE='전체', OPEN=new Set(), SORT=['place',1], FULLCMD=new Set();
+try{PLACE=localStorage.getItem('sm_place')||'전체'; const t=localStorage.getItem('sm_theme'); if(t) document.documentElement.dataset.theme=t;}catch(e){}
+{const P=new URLSearchParams(location.search); if(P.get('place')) PLACE=P.get('place'); (P.get('open')||'').split(',').filter(Boolean).forEach(k=>OPEN.add(k));}
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const gb=m=>m==null?'–':(m/1024).toFixed(m>=10240?0:1);
+const pct=v=>v==null?'–':v.toFixed(0)+'%';
+const dur=s=>{if(s==null)return '–';const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return d?`${d}d ${h}h`:h?`${h}h ${m}m`:`${m}m`;};
+const ago=s=>s==null?'–':s<90?`${Math.round(s)}초 전`:s<5400?`${Math.round(s/60)}분 전`:s<172800?`${Math.round(s/3600)}시간 전`:`${Math.round(s/86400)}일 전`;
+const meter=(v,max,label)=>`<div class="meter"><b><i style="width:${Math.max(0,Math.min(100,max?100*v/max:0))}%"></i></b><em>${label}</em></div>`;
+const ucls=u=>u==null?0:u<5?0:u<30?1:u<60?2:u<85?3:4;
+const cudaShort=si=>(si.cuda_toolkits||[]).map(c=>c.replace('cuda-','')).join(', ');
+
+$('#q').oninput=render;
+$('#theme').onclick=()=>{const r=document.documentElement;const dark=r.dataset.theme?r.dataset.theme==='dark':matchMedia('(prefers-color-scheme: dark)').matches;r.dataset.theme=dark?'light':'dark';try{localStorage.setItem('sm_theme',r.dataset.theme)}catch(e){}};
+function setPlace(p){PLACE=p;try{localStorage.setItem('sm_place',p)}catch(e){};render();}
+function toggle(key){OPEN.has(key)?OPEN.delete(key):OPEN.add(key);render();}
+function toggleCmd(key,ev){ev.stopPropagation();FULLCMD.has(key)?FULLCMD.delete(key):FULLCMD.add(key);render();}
+function sortBy(k){SORT=[k,SORT[0]===k?-SORT[1]:(['alias','owner','place','os'].includes(k)?1:-1)];render();}
+function th(k,label,num){return `<th class="${num?'num':''}" onclick="sortBy('${k}')">${label}${SORT[0]===k?(SORT[1]>0?' ▲':' ▼'):''}</th>`;}
+function keyOf(s,k){if(k==='place')return DATA.places.indexOf(s.place);if(k==='os')return (s.sysinfo||{}).os_short;if(k==='load')return s.ncpu?s.load1/s.ncpu:null;return s[k];}
+function sortServers(arr){const [k,d]=SORT;return arr.slice().sort((a,b)=>{let x=keyOf(a,k),y=keyOf(b,k);if(x==null&&y==null)return a.alias<b.alias?-1:1;if(x==null)return 1;if(y==null)return -1;if(x===y)return a.alias<b.alias?-1:1;return (x>y?1:-1)*d;});}
+function match(q,...xs){return !q||xs.some(x=>String(x??'').toLowerCase().includes(q));}
+
+function procTable(rows){
+  if(!rows.length) return '<span class="muted">프로세스 없음</span>';
+  return `<table class="sub"><tr><th>GPU</th><th class="num">PID</th><th class="num">Mem 5m avg</th><th class="num">Mem now</th><th class="num">Util 5m avg</th><th class="num">SM% avg</th><th class="num">실행시간</th><th>명령어</th></tr>`+
+  rows.map(r=>{const key=`${r.gpu}:${r.pid}`;return `<tr class="${r.alive?'':'dead'}"><td>${r.gpu}</td><td class="num">${r.pid}</td><td class="num">${gb(r.mem_avg)} GB</td><td class="num">${r.alive?gb(r.mem_now)+' GB':'종료'}</td><td class="num">${pct(r.util_avg)}</td><td class="num">${pct(r.sm_avg)}</td><td class="num">${dur(r.etime)}</td><td class="cmd ${FULLCMD.has(key)?'full':''}" title="클릭: 전체 보기" onclick="toggleCmd('${esc(key)}',event)">${esc(r.cmd)||'<span class=muted>(ps 정보 없음 — 컨테이너/권한)</span>'}</td></tr>`;}).join('')+'</table>';
+}
+
+function sysBlock(s){
+  const si=s.sysinfo||{};
+  if(!si.ts) return '<span class="muted">아직 수집 전</span>';
+  return `<dl class="kv"><dt>OS</dt><dd>${esc(si.os)}</dd><dt>Kernel</dt><dd>${esc(si.kernel)}</dd><dt>Driver</dt><dd>${esc(si.driver||'–')}${si.driver_cuda?` (CUDA ${esc(si.driver_cuda)} 지원)`:''}</dd><dt>CUDA toolkit</dt><dd>${esc((si.cuda_toolkits||[]).join(', ')||'없음 (/usr/local/cuda-*)')}</dd><dt>CPU</dt><dd>${s.ncpu??'?'} cores · RAM ${(s.ram_total_gb||0).toFixed(0)} GB</dd><dt>갱신</dt><dd>${new Date(si.ts*1000).toLocaleDateString()} (${ago(DATA.generated-si.ts)}, ${DATA.sysinfo_days}일마다)</dd></dl>`;
+}
+
+function serverRows(s){
+  const key='s:'+s.alias, open=OPEN.has(key), si=s.sysinfo||{};
+  const osCell=`<td class="small">${esc(si.os_short||'–')}<div class="muted">${si.cuda_toolkits?('CUDA '+esc(cudaShort(si)||'없음')):''}</div></td>`;
+  if(s.status==='unreachable')
+    return `<tr><td><span class="dot bad"></span><b>${esc(s.alias)}</b> <span class="muted small">${esc(s.ip)}</span></td><td class="owner">${esc(s.owner)}</td><td colspan="7" class="err">접속 불가: ${esc(s.error||'대기 중…')}</td>${osCell}</tr>`;
+  const dc=s.status==='ok'?'ok':s.status==='stale'?'bad':'warn';
+  const cells=(s.gpus||[]).map(g=>`<div class="gcell" style="background:var(--u${ucls(g.util_avg)})" title="GPU${g.idx} ${esc(g.name)}\nutil ${pct(g.util_avg)} · mem ${gb(g.mem_avg)}/${gb(g.mem_total)} GB\n${g.temp??'–'}°C ${g.power??'–'}W\n${esc(g.users.join(', ')||'free')}"><i style="height:${g.mem_total?100*g.mem_avg/g.mem_total:0}%"></i><s style="color:${ucls(g.util_avg)>=3?'#fff':'inherit'}">${g.idx}</s></div>`).join('');
+  const staleNote=s.status==='stale'?`<div class="err">마지막 수집 ${ago(s.age)} — ${esc(s.error||'')}</div>`:'';
+  let h=`<tr class="row ${open?'open':''} ${s.status==='stale'?'stale':''}" onclick="toggle('${esc(key)}')"><td><span class="caret">▶</span><span class="dot ${dc}" title="${esc(s.error||s.status)}"></span><b>${esc(s.alias)}</b><div class="muted" style="font-size:11px;padding-left:28px">${esc(s.ip)} · ${esc((s.gpu_name||'no GPU').replace('NVIDIA ','').replace(' Workstation Edition',''))}</div>${staleNote}</td>
+    <td class="owner">${esc(s.owner)||'<span class=muted>–</span>'}</td>
+    <td>${meter(s.cpu||0,100,pct(s.cpu))}</td><td class="num">${s.load1??'–'}<div class="muted small">/${s.ncpu??'?'}</div></td><td>${meter(s.ram_used_gb||0,s.ram_total_gb||1,`${(s.ram_used_gb||0).toFixed(0)}/${(s.ram_total_gb||0).toFixed(0)} GB`)}</td>
+    <td><div class="gcells">${cells}</div></td><td class="num">${s.gpu_free}/${(s.gpus||[]).length}</td><td>${meter(s.mem_avg_all||0,s.mem_total_all||1,gb(s.mem_avg_all)+' / '+gb(s.mem_total_all)+' GB')}</td><td>${meter(s.util_avg_all||0,100,pct(s.util_avg_all))}</td>${osCell}</tr>`;
+  if(open){
+    const gt=`<table class="sub"><tr><th>GPU</th><th class="num">Mem 5m avg</th><th class="num">Util 5m avg</th><th class="num">now</th><th class="num">°C / W</th><th>유저</th></tr>`+(s.gpus||[]).map(g=>`<tr><td>${g.idx}</td><td class="num">${gb(g.mem_avg)} / ${gb(g.mem_total)} GB</td><td class="num">${pct(g.util_avg)}</td><td class="num">${pct(g.util_now)} · ${gb(g.mem_now)} GB</td><td class="num">${g.temp??'–'} / ${g.power!=null?g.power.toFixed(0):'–'}</td><td>${g.users.map(esc).join(', ')||'<span class=muted>free</span>'}</td></tr>`).join('')+'</table>';
+    let ut=`<table class="sub"><tr><th>유저</th><th class="num">Mem 5m avg</th><th class="num">Util 5m avg</th><th>GPU</th></tr>`;
+    for(const u of s.users||[]){const k2=key+':'+u.user,o2=OPEN.has(k2);
+      ut+=`<tr class="row ${o2?'open':''}" onclick="event.stopPropagation();toggle('${esc(k2)}')"><td><span class="caret">▶</span>${esc(u.user)}</td><td class="num">${gb(u.mem_avg)} GB</td><td class="num">${pct(u.util_avg)}</td><td>${u.gpus.join(', ')||'–'}</td></tr>`;
+      if(o2) ut+=`<tr class="detail"><td colspan="4">${procTable(u.procs)}</td></tr>`;}
+    ut+='</table>';
+    const cu=(s.cpu_users||[]).map(([u,v])=>`<span class="tag">${esc(u)} ${v.toFixed(0)}%</span>`).join('')||'<span class=muted>–</span>';
+    h+=`<tr class="detail"><td colspan="10"><div class="grid2"><div><h3>GPU별 (최근 5분)</h3>${gt}<h3 style="margin-top:10px">CPU 많이 쓰는 유저 (ps %CPU 합, 100%=1코어)</h3>${cu}<h3 style="margin-top:10px">시스템</h3>${sysBlock(s)}</div><div><h3>GPU 사용 유저 — 클릭하면 프로세스</h3>${(s.users||[]).length?ut:'<span class=muted>GPU 프로세스 없음</span>'}</div></div>${s.error&&s.status!=='stale'?`<div class="err">최근 수집 오류: ${esc(s.error)}</div>`:''}</td></tr>`;
+  }
+  return h;
+}
+
+function render(){
+  if(!DATA) return;
+  const places=['전체',...DATA.places.filter(p=>DATA.servers.some(s=>s.place===p))];
+  if(!places.includes(PLACE)) PLACE='전체';
+  const inPlace=DATA.servers.filter(s=>PLACE==='전체'||s.place===PLACE);
+  $('#tabs').innerHTML=places.map(p=>{const n=DATA.servers.filter(s=>p==='전체'||s.place===p).length;return `<button class="${p===PLACE?'on':''}" onclick="setPlace('${esc(p)}')">${esc(p)}<small>${n}</small></button>`;}).join('');
+  const up=inPlace.filter(s=>s.status!=='unreachable'), allG=up.flatMap(s=>s.gpus||[]);
+  const free=up.reduce((a,s)=>a+(s.gpu_free||0),0);
+  const memU=allG.reduce((a,g)=>a+(g.mem_avg||0),0), memT=allG.reduce((a,g)=>a+(g.mem_total||0),0);
+  const utilA=allG.length?allG.reduce((a,g)=>a+(g.util_avg||0),0)/allG.length:0;
+  const cpuA=up.length?up.reduce((a,s)=>a+(s.cpu||0),0)/up.length:0;
+  $('#kpis').innerHTML=[[`${up.length}/${inPlace.length}`,'접속된 서버'],[`${free} / ${allG.length}`,'빈 GPU (프로세스 없음, <1GB)'],[`${(memU/1024).toFixed(0)} / ${(memT/1024).toFixed(0)} GB`,'GPU 메모리 (5m avg)'],[`${utilA.toFixed(0)}%`,'GPU util 평균 (5m)'],[`${cpuA.toFixed(0)}%`,'CPU 평균 (5m)']].map(([b,s])=>`<div class="kpi"><b>${b}</b><span>${s}</span></div>`).join('');
+  $('#meta').textContent=`갱신 ${new Date(DATA.generated*1000).toLocaleTimeString()} · ${DATA.interval}초마다 수집 · ${DATA.window/60}분 평균`;
+  $('#foot').textContent=`CPU/GPU 값은 최근 ${DATA.window/60}분 rolling 평균 (샘플이 없던 구간은 0으로 계산). 유저 util은 GPU util을 pmon SM% 비율(없으면 메모리 비율)로 프로세스에 나눈 합. OS/CUDA는 ${DATA.sysinfo_days}일마다 갱신. 행을 클릭하면 GPU별·유저별 상세와 프로세스가 펼쳐집니다.`;
+  const q=$('#q').value.trim().toLowerCase();
+  let ss=inPlace.filter(s=>match(q,s.alias,s.hostname,s.ip,s.owner,s.place,s.gpu_name,(s.sysinfo||{}).os,cudaShort(s.sysinfo||{}),...(s.users||[]).map(u=>u.user)));
+  ss=sortServers(ss); ss=ss.filter(s=>s.status!=='unreachable').concat(ss.filter(s=>s.status==='unreachable'));
+  let h=`<table><tr>${th('alias','서버')}${th('owner','담당자')}${th('cpu','CPU (5m)')}${th('load','Load',1)}${th('ram_used_gb','RAM')}<th>GPU (칸=util, 채움=mem)</th>${th('gpu_free','빈 GPU',1)}${th('mem_avg_all','GPU Mem 합 (5m)')}${th('util_avg_all','GPU Util (5m)')}${th('os','OS / CUDA')}</tr>`;
+  let lastPlace=null;
+  for(const s of ss){
+    if(PLACE==='전체'&&SORT[0]==='place'&&s.place!==lastPlace&&s.status!=='unreachable'){lastPlace=s.place;h+=`<tr><td colspan="10" class="muted small" style="background:var(--bg);font-weight:600">📍 ${esc(s.place)}</td></tr>`;}
+    h+=serverRows(s);
+  }
+  $('#view').innerHTML=h+'</table>';
+}
+async function tick(){
+  try{const r=await fetch('api/status',{cache:'no-store'});DATA=await r.json();render();}
+  catch(e){$('#meta').textContent='collector 연결 실패: '+e;}
+}
+tick(); setInterval(tick,10000);
+</script>
+</body>
+</html>

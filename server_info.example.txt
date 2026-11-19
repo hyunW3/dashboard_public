@@ -1,0 +1,14 @@
+# Copy to server_info.txt (git-ignored) and fill in your servers.
+# "[place]" header, then "<IP as in ssh config HostName> <owner or note>" per line.
+# Servers not listed go to the "기타" tab. Edits apply on the next refresh (no restart).
+
+[building-A]
+192.0.2.11 alice
+192.0.2.12 bob / carol
+192.0.2.13 shared — heavy vLLM jobs, be careful
+
+[building-B]
+198.51.100.21 dave
+198.51.100.22 shared
+
+[기타]
