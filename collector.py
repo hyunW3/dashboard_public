@@ -428,7 +428,7 @@ def main():
     ap.add_argument("--window", type=float, default=300, help="averaging window (s)")
     ap.add_argument("--sysinfo-days", type=float, default=7, help="OS/CUDA refresh period (days)")
     ap.add_argument("--cache", default=os.path.join(HERE, "cache", "sysinfo.json"))
-    ap.add_argument("--bind", default="127.0.0.1")
+    ap.add_argument("--bind", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8501)
     args = ap.parse_args()
 
