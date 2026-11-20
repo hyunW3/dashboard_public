@@ -198,6 +198,51 @@ class SysinfoCache:
             os.replace(tmp, self.path)
 
 
+class GpuIdleCache:
+    """Last time each GPU was busy, per remote hostname, persisted to disk.
+    busy = has a compute process or >= 1 GB used (inverse of the 'free GPU' rule).
+    'first' = when this host was first monitored (lower bound for never-busy GPUs)."""
+
+    def __init__(self, path):
+        self.path, self.lock, self.saved = path, threading.Lock(), 0.0
+        try:
+            self.data = json.load(open(path))
+        except (OSError, ValueError):
+            self.data = {}
+
+    def update(self, host, sample):
+        now = time.time()
+        busy = {pr["gpu"] for pr in sample["procs"]} | {g["idx"] for g in sample["gpus"] if g["mem_used"] >= 1024}
+        with self.lock:
+            h = self.data.setdefault(host, {"first": now, "last": {}})
+            freed = False
+            for g in sample["gpus"]:
+                k = str(g["idx"])
+                if g["idx"] in busy:
+                    h["last"][k] = now
+                elif h["last"].get(k, 0) > self.saved:
+                    freed = True  # busy -> idle since last save: persist right away
+            if freed or now - self.saved > 60:
+                self._save(now)
+
+    def _save(self, now):
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        tmp = self.path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(self.data, f, indent=1, sort_keys=True)
+        os.replace(tmp, self.path)
+        self.saved = now
+
+    def idle(self, host, idx, now):
+        """-> (idle seconds, is_lower_bound) or (None, False) if unknown."""
+        with self.lock:
+            h = self.data.get(host)
+            if not h:
+                return None, False
+            t = h["last"].get(str(idx))
+            return (now - t, False) if t else (now - h["first"], True)
+
+
 def parse_sysinfo(sec):
     os_lines = sec.get("OS", []) + ["", ""]
     drv = sec.get("DRIVER", []) + ["", ""]
@@ -304,7 +349,7 @@ def parse_sample(st, sec):
     return s
 
 
-def poll_host(st, ssh, sysinfo, args):
+def poll_host(st, ssh, sysinfo, gpuidle, args):
     while True:
         t0 = time.time()
         try:
@@ -315,6 +360,7 @@ def poll_host(st, ssh, sysinfo, args):
                 while st.samples and st.samples[0]["ts"] < time.time() - st.window:
                     st.samples.popleft()
                 st.error, st.last_ok = None, time.time()
+            gpuidle.update(st.hostname, s)
             if sysinfo.due(st.alias):
                 sysinfo.put(st.alias, parse_sysinfo(ssh.run(st.alias, SYSINFO_SCRIPT, 30)))
         except Exception as e:  # noqa
@@ -325,7 +371,7 @@ def poll_host(st, ssh, sysinfo, args):
 
 # ---------------------------------------------------------------- summary
 
-def summarize(states, args, sysinfo):
+def summarize(states, args, sysinfo, gpuidle):
     now = time.time()
     owners, places, place_order = load_server_info(args.server_info)
     # same machine via two aliases (gpu01 / gpu01_admin) -> keep one, prefer one listed in server_info
@@ -393,7 +439,15 @@ def summarize(states, args, sysinfo):
                 if gi in gmap and pr["user"] not in gmap[gi]["users"]:
                     gmap[gi]["users"].append(pr["user"])
         srv["gpus"] = gpus
-        srv["gpu_free"] = sum(1 for g in gpus if not g["users"] and (g["mem_now"] or 0) < 1024)
+        idle = []
+        for g in gpus:
+            g["free"] = not g["users"] and (g["mem_now"] or 0) < 1024
+            g["idle_s"], g["idle_lb"] = gpuidle.idle(hn, g["idx"], now) if g["free"] else (None, False)
+            if g["idle_s"] is not None:
+                idle.append((g["idle_s"], g["idle_lb"]))
+        srv["gpu_free"] = sum(1 for g in gpus if g["free"])
+        # longest-idle among currently free GPUs
+        srv["idle_max"], srv["idle_lb"] = max(idle) if idle else (None, False)
         srv["users"] = sorted([{"user": k, "mem_avg": v["mem"], "util_avg": v["util"], "gpus": sorted(v["gpus"]),
                                 "procs": sorted(v["procs"], key=lambda r: (r["gpu"], -r["mem_avg"]))}
                                for k, v in su.items()], key=lambda r: -r["mem_avg"])
@@ -440,9 +494,10 @@ def main():
     os.makedirs(ctl_dir, mode=0o700, exist_ok=True)
     ssh = Ssh(args.ssh_config or None, ctl_dir)
     sysinfo = SysinfoCache(args.cache, args.sysinfo_days * 86400)
+    gpuidle = GpuIdleCache(os.path.join(os.path.dirname(args.cache), "gpu_last_used.json"))
     states = [HostState(h, ssh.resolve_ip(h), args.window) for h in hosts]
     for st in states:
-        threading.Thread(target=poll_host, args=(st, ssh, sysinfo, args), daemon=True).start()
+        threading.Thread(target=poll_host, args=(st, ssh, sysinfo, gpuidle, args), daemon=True).start()
 
     cache = {"t": 0, "body": b"{}"}
     cache_lock = threading.Lock()
@@ -464,7 +519,7 @@ def main():
             if path == "/api/status":
                 with cache_lock:
                     if time.time() - cache["t"] > 3:
-                        cache["body"] = json.dumps(summarize(states, args, sysinfo), ensure_ascii=False).encode()
+                        cache["body"] = json.dumps(summarize(states, args, sysinfo, gpuidle), ensure_ascii=False).encode()
                         cache["t"] = time.time()
                     body = cache["body"]
                 self._send(200, body, "application/json; charset=utf-8")

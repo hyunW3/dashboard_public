@@ -5,7 +5,7 @@ who is using each GPU, and which processes are running — refreshed continuousl
 Python standard library only (no Streamlit, Ansible or pandas). UI text is Korean.
 
 - Server table grouped by place tabs, with owner, CPU % (5-min avg), load / cores, RAM,
-  one cell per GPU (colour = util, fill = memory), free GPUs, GPU memory / util, OS and CUDA.
+  one cell per GPU (colour = util, fill = memory), free GPUs, idle time, GPU memory / util, OS and CUDA.
 - Click a server row → per-GPU table, GPU users, CPU-heavy users, OS / kernel / driver / CUDA toolkits.
   Click a user → their GPU processes (PID, command line, elapsed time, memory, SM %).
 - Servers that stop responding are greyed out with "last collected N min ago" instead of showing stale numbers.
@@ -46,6 +46,7 @@ Binding to `0.0.0.0` exposes other users' command lines — keep it on a trusted
 | CPU %, load, RAM, GPU mem/util, GPU processes | every 15 s | one SSH call per host (ControlMaster reused): `/proc/stat`, `/proc/meminfo`, `nvidia-smi`, `nvidia-smi pmon`, `ps` |
 | displayed values | — | 5-min rolling average kept in memory |
 | OS, kernel, driver, CUDA toolkits (`/usr/local/cuda-X.Y`) | every 7 days | cached on disk, survives restarts |
+| last time each GPU was busy | every 15 s (written at most every 60 s, and immediately when a GPU goes idle) | `cache/gpu_last_used.json`, one timestamp per GPU, overwritten (not a growing log) |
 
 - Aliases pointing at the same HostName/port are merged (your own-user alias preferred); one machine reached via
   two aliases (same remote hostname) is shown once.
@@ -53,6 +54,9 @@ Binding to `0.0.0.0` exposes other users' command lines — keep it on a trusted
   (`ssh-keygen -R '[host]:port'`).
 - **Per-user GPU util** is an estimate: each GPU's utilisation split across its processes by `pmon` SM % (memory share if unavailable).
 - **5-min averages** count missing samples as 0, so jobs that just started look lower.
+- **Idle (유휴)** = among the GPUs that are free right now, how long the longest-idle one has been unused; `–` when no GPU
+  is free. `≥` means the GPU has not been busy since monitoring began, so the real idle time is at least that long
+  (`nvidia-smi` keeps no history from before the collector started).
 - **Free GPU** = no processes and < 1 GB used. Processes inside containers whose owner `ps` cannot see show as `?(container)`.
 
 ## Files
