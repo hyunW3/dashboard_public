@@ -97,6 +97,7 @@ const gb=m=>m==null?'–':(m/1024).toFixed(m>=10240?0:1);
 const pct=v=>v==null?'–':v.toFixed(0)+'%';
 const dur=s=>{if(s==null)return '–';const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return d?`${d}d ${h}h`:h?`${h}h ${m}m`:`${m}m`;};
 const ago=s=>s==null?'–':s<90?`${Math.round(s)}초 전`:s<5400?`${Math.round(s/60)}분 전`:s<172800?`${Math.round(s/3600)}시간 전`:`${Math.round(s/86400)}일 전`;
+const idleFmt=(s,lb)=>{if(s==null)return '–';const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return (lb?'≥':'')+(d?`${d}일 ${h}시간`:h?`${h}시간 ${m}분`:`${m}분`);};
 const meter=(v,max,label)=>`<div class="meter"><b><i style="width:${Math.max(0,Math.min(100,max?100*v/max:0))}%"></i></b><em>${label}</em></div>`;
 const ucls=u=>u==null?0:u<5?0:u<30?1:u<60?2:u<85?3:4;
 const cudaShort=si=>(si.cuda_toolkits||[]).map(c=>c.replace('cuda-','')).join(', ');
@@ -128,14 +129,14 @@ function serverRows(s){
   const key='s:'+s.alias, open=OPEN.has(key), si=s.sysinfo||{};
   const osCell=`<td class="small">${esc(si.os_short||'–')}<div class="muted">${si.cuda_toolkits?('CUDA '+esc(cudaShort(si)||'없음')):''}</div></td>`;
   if(s.status==='unreachable')
-    return `<tr><td><span class="dot bad"></span><b>${esc(s.alias)}</b> <span class="muted small">${esc(s.ip)}</span></td><td class="owner">${esc(s.owner)}</td><td colspan="7" class="err">접속 불가: ${esc(s.error||'대기 중…')}</td>${osCell}</tr>`;
+    return `<tr><td><span class="dot bad"></span><b>${esc(s.alias)}</b> <span class="muted small">${esc(s.ip)}</span></td><td class="owner">${esc(s.owner)}</td><td colspan="8" class="err">접속 불가: ${esc(s.error||'대기 중…')}</td>${osCell}</tr>`;
   const dc=s.status==='ok'?'ok':s.status==='stale'?'bad':'warn';
-  const cells=(s.gpus||[]).map(g=>`<div class="gcell" style="background:var(--u${ucls(g.util_avg)})" title="GPU${g.idx} ${esc(g.name)}\nutil ${pct(g.util_avg)} · mem ${gb(g.mem_avg)}/${gb(g.mem_total)} GB\n${g.temp??'–'}°C ${g.power??'–'}W\n${esc(g.users.join(', ')||'free')}"><i style="height:${g.mem_total?100*g.mem_avg/g.mem_total:0}%"></i><s style="color:${ucls(g.util_avg)>=3?'#fff':'inherit'}">${g.idx}</s></div>`).join('');
+  const cells=(s.gpus||[]).map(g=>`<div class="gcell" style="background:var(--u${ucls(g.util_avg)})" title="GPU${g.idx} ${esc(g.name)}\nutil ${pct(g.util_avg)} · mem ${gb(g.mem_avg)}/${gb(g.mem_total)} GB\n${g.temp??'–'}°C ${g.power??'–'}W\n${esc(g.users.join(', ')||'free')}${g.free&&g.idle_s!=null?' · 유휴 '+idleFmt(g.idle_s,g.idle_lb):''}"><i style="height:${g.mem_total?100*g.mem_avg/g.mem_total:0}%"></i><s style="color:${ucls(g.util_avg)>=3?'#fff':'inherit'}">${g.idx}</s></div>`).join('');
   const staleNote=s.status==='stale'?`<div class="err">마지막 수집 ${ago(s.age)} — ${esc(s.error||'')}</div>`:'';
   let h=`<tr class="row ${open?'open':''} ${s.status==='stale'?'stale':''}" onclick="toggle('${esc(key)}')"><td><span class="caret">▶</span><span class="dot ${dc}" title="${esc(s.error||s.status)}"></span><b>${esc(s.alias)}</b><div class="muted" style="font-size:11px;padding-left:28px">${esc(s.ip)} · ${esc((s.gpu_name||'no GPU').replace('NVIDIA ','').replace(' Workstation Edition',''))}</div>${staleNote}</td>
     <td class="owner">${esc(s.owner)||'<span class=muted>–</span>'}</td>
     <td>${meter(s.cpu||0,100,pct(s.cpu))}</td><td class="num">${s.load1??'–'}<div class="muted small">/${s.ncpu??'?'}</div></td><td>${meter(s.ram_used_gb||0,s.ram_total_gb||1,`${(s.ram_used_gb||0).toFixed(0)}/${(s.ram_total_gb||0).toFixed(0)} GB`)}</td>
-    <td><div class="gcells">${cells}</div></td><td class="num">${s.gpu_free}/${(s.gpus||[]).length}</td><td>${meter(s.mem_avg_all||0,s.mem_total_all||1,gb(s.mem_avg_all)+' / '+gb(s.mem_total_all)+' GB')}</td><td>${meter(s.util_avg_all||0,100,pct(s.util_avg_all))}</td>${osCell}</tr>`;
+    <td><div class="gcells">${cells}</div></td><td class="num">${s.gpu_free}/${(s.gpus||[]).length}</td><td class="num small" title="빈 GPU 중 가장 오래 쉰 GPU 기준${s.idle_lb?' (≥: 모니터 기록 시작 이후 계속 미사용)':''}">${idleFmt(s.idle_max,s.idle_lb)}</td><td>${meter(s.mem_avg_all||0,s.mem_total_all||1,gb(s.mem_avg_all)+' / '+gb(s.mem_total_all)+' GB')}</td><td>${meter(s.util_avg_all||0,100,pct(s.util_avg_all))}</td>${osCell}</tr>`;
   if(open){
     const gt=`<table class="sub"><tr><th>GPU</th><th class="num">Mem 5m avg</th><th class="num">Util 5m avg</th><th class="num">now</th><th class="num">°C / W</th><th>유저</th></tr>`+(s.gpus||[]).map(g=>`<tr><td>${g.idx}</td><td class="num">${gb(g.mem_avg)} / ${gb(g.mem_total)} GB</td><td class="num">${pct(g.util_avg)}</td><td class="num">${pct(g.util_now)} · ${gb(g.mem_now)} GB</td><td class="num">${g.temp??'–'} / ${g.power!=null?g.power.toFixed(0):'–'}</td><td>${g.users.map(esc).join(', ')||'<span class=muted>free</span>'}</td></tr>`).join('')+'</table>';
     let ut=`<table class="sub"><tr><th>유저</th><th class="num">Mem 5m avg</th><th class="num">Util 5m avg</th><th>GPU</th></tr>`;
@@ -144,7 +145,7 @@ function serverRows(s){
       if(o2) ut+=`<tr class="detail"><td colspan="4">${procTable(u.procs)}</td></tr>`;}
     ut+='</table>';
     const cu=(s.cpu_users||[]).map(([u,v])=>`<span class="tag">${esc(u)} ${v.toFixed(0)}%</span>`).join('')||'<span class=muted>–</span>';
-    h+=`<tr class="detail"><td colspan="10"><div class="grid2"><div><h3>GPU별 (최근 5분)</h3>${gt}<h3 style="margin-top:10px">CPU 많이 쓰는 유저 (ps %CPU 합, 100%=1코어)</h3>${cu}<h3 style="margin-top:10px">시스템</h3>${sysBlock(s)}</div><div><h3>GPU 사용 유저 — 클릭하면 프로세스</h3>${(s.users||[]).length?ut:'<span class=muted>GPU 프로세스 없음</span>'}</div></div>${s.error&&s.status!=='stale'?`<div class="err">최근 수집 오류: ${esc(s.error)}</div>`:''}</td></tr>`;
+    h+=`<tr class="detail"><td colspan="11"><div class="grid2"><div><h3>GPU별 (최근 5분)</h3>${gt}<h3 style="margin-top:10px">CPU 많이 쓰는 유저 (ps %CPU 합, 100%=1코어)</h3>${cu}<h3 style="margin-top:10px">시스템</h3>${sysBlock(s)}</div><div><h3>GPU 사용 유저 — 클릭하면 프로세스</h3>${(s.users||[]).length?ut:'<span class=muted>GPU 프로세스 없음</span>'}</div></div>${s.error&&s.status!=='stale'?`<div class="err">최근 수집 오류: ${esc(s.error)}</div>`:''}</td></tr>`;
   }
   return h;
 }
@@ -166,10 +167,10 @@ function render(){
   const q=$('#q').value.trim().toLowerCase();
   let ss=inPlace.filter(s=>match(q,s.alias,s.hostname,s.ip,s.owner,s.place,s.gpu_name,(s.sysinfo||{}).os,cudaShort(s.sysinfo||{}),...(s.users||[]).map(u=>u.user)));
   ss=sortServers(ss); ss=ss.filter(s=>s.status!=='unreachable').concat(ss.filter(s=>s.status==='unreachable'));
-  let h=`<table><tr>${th('alias','서버')}${th('owner','담당자')}${th('cpu','CPU (5m)')}${th('load','Load',1)}${th('ram_used_gb','RAM')}<th>GPU (칸=util, 채움=mem)</th>${th('gpu_free','빈 GPU',1)}${th('mem_avg_all','GPU Mem 합 (5m)')}${th('util_avg_all','GPU Util (5m)')}${th('os','OS / CUDA')}</tr>`;
+  let h=`<table><tr>${th('alias','서버')}${th('owner','담당자')}${th('cpu','CPU (5m)')}${th('load','Load',1)}${th('ram_used_gb','RAM')}<th>GPU (칸=util, 채움=mem)</th>${th('gpu_free','빈 GPU',1)}${th('idle_max','유휴',1)}${th('mem_avg_all','GPU Mem 합 (5m)')}${th('util_avg_all','GPU Util (5m)')}${th('os','OS / CUDA')}</tr>`;
   let lastPlace=null;
   for(const s of ss){
-    if(PLACE==='전체'&&SORT[0]==='place'&&s.place!==lastPlace&&s.status!=='unreachable'){lastPlace=s.place;h+=`<tr><td colspan="10" class="muted small" style="background:var(--bg);font-weight:600">📍 ${esc(s.place)}</td></tr>`;}
+    if(PLACE==='전체'&&SORT[0]==='place'&&s.place!==lastPlace&&s.status!=='unreachable'){lastPlace=s.place;h+=`<tr><td colspan="11" class="muted small" style="background:var(--bg);font-weight:600">📍 ${esc(s.place)}</td></tr>`;}
     h+=serverRows(s);
   }
   $('#view').innerHTML=h+'</table>';
